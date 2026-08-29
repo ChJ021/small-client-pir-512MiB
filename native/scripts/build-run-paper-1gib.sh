@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Prepare, build, and run the author's 512 MiB honest-H paper profile in place.
+# Prepare, build, and run the author's 1 GiB honest-H paper profile in place.
 #
 # This script intentionally does not call pir_verify_upstream after changing the
 # profile: that verifier is the immutable 2 MiB baseline gate.  Instead, this
@@ -13,16 +13,16 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
-readonly PAPER_PROFILE="honest-h-paper-512mib"
+readonly PAPER_PROFILE="honest-h-paper-1gib"
 readonly TEST_SOURCE="$PIR_UPSTREAM_DIR/hintless_simplepir/new_pir_test.cc"
-readonly MINIMUM_MEMORY_KIB=$((12 * 1024 * 1024))
-readonly RECOMMENDED_MEMORY_KIB=$((16 * 1024 * 1024))
+readonly MINIMUM_MEMORY_KIB=$((20 * 1024 * 1024))
+readonly RECOMMENDED_MEMORY_KIB=$((32 * 1024 * 1024))
 
 usage() {
   cat <<'EOF'
-Usage: native/scripts/build-run-paper-512mib.sh [OPTIONS]
+Usage: native/scripts/build-run-paper-1gib.sh [OPTIONS]
 
-Prepare the current upstream checkout in place for the author's 512 MiB
+Prepare the current upstream checkout in place for the author's 1 GiB
 honest-H profile, build it with the pinned project-local Bazel toolchain, and
 run HintlessSimplePir.EndToEndPIRTest while recording resource usage.
 
@@ -38,14 +38,14 @@ Options:
   -h, --help      Show this help text.
 
 Environment:
-  PIR_ALLOW_LOW_MEMORY=1  Override the <12 GiB runtime refusal.
+  PIR_ALLOW_LOW_MEMORY=1  Override the <20 GiB runtime refusal.
   PIR_KEEP_PROXY=1        Preserve caller HTTP(S)/ALL proxy variables.
   PIR_SCALAR=1            Compile Highway in scalar fallback mode.
 
-The operation is idempotent. The source is prepared for the 512 MiB database
+The operation is idempotent. The source is prepared for the 1 GiB database
 once; backend selection is a runtime argument and never rewrites source or a
 compile-time macro. Existing logs remain under native/logs; new artifacts go
-under native/logs/512mib/<preproc-profile>/<run-id>/.
+under native/logs/1gib/<preproc-profile>/<run-id>/.
 EOF
 }
 
@@ -96,7 +96,7 @@ readonly OFFLINE_RING_DEGREE_EXPLICIT="$offline_ring_degree_explicit"
 if [[ "$PREPROC_PROFILE" == "ypir-main" || "$PREPROC_PROFILE" == "hybrid" ]]; then
   readonly MAIN_PREPROC_BACKEND="ypir-exact-ntt"
   readonly MAIN_RING_DEGREE="2048"
-  readonly MAIN_PAD_BLOCK_COUNT="8"
+  readonly MAIN_PAD_BLOCK_COUNT="16"
   readonly MAIN_STRUCTURED_PAD_VERSION="1"
   readonly MAIN_PRG_DOMAIN="small-client-pir/main-pad/ypir-ntt/v1"
   readonly MAIN_SECURITY_STATUS="experimental-ring-lwe-ring-sis-parameters-not-audited"
@@ -140,13 +140,13 @@ pir_require_command /usr/bin/time
   || pir_die "the bundled Bazel binary and validated native profile require x86_64"
 
 pir_prepare_local_paths
-readonly PROFILE_LOG_ROOT="$PIR_LOG_DIR/512mib/$PREPROC_PROFILE"
+readonly PROFILE_LOG_ROOT="$PIR_LOG_DIR/1gib/$PREPROC_PROFILE"
 mkdir -p "$PROFILE_LOG_ROOT"
 
 # Prevent two copies of this orchestration script from allocating the paper
 # profile concurrently.  Manual binary launches are checked again before run.
 exec 9>"$PROFILE_LOG_ROOT/.execution.lock"
-flock -n 9 || pir_die "another 512 MiB build/run script already holds the execution lock"
+flock -n 9 || pir_die "another 1 GiB build/run script already holds the execution lock"
 
 readonly WORKSPACE_TEST_BINARY="$PIR_BAZEL_ROOT/symlinks/bazel-bin/hintless_simplepir/new_pir_test"
 ensure_no_active_test() {
@@ -207,20 +207,20 @@ verify_common_checkout() {
   git -C "$PIR_UPSTREAM_DIR" diff --check
 }
 
-verify_512_source() {
+verify_1_source() {
   grep -Eq 'const int rows_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
     || pir_die "paper profile rows_db=32768 is missing"
-  grep -Eq 'const int cols_db[[:space:]]*=[[:space:]]*16384;' "$TEST_SOURCE" \
-    || pir_die "paper profile cols_db=16384 is missing"
-  grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*8,' "$TEST_SOURCE" \
-    || pir_die "paper profile db_stack_cells=8 is missing"
+  grep -Eq 'const int cols_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
+    || pir_die "paper profile cols_db=32768 is missing"
+  grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,' "$TEST_SOURCE" \
+    || pir_die "paper profile db_stack_cells=1 is missing"
   grep -Eq '^[[:space:]]*\.db_record_bit_size[[:space:]]*=[[:space:]]*8,' "$TEST_SOURCE" \
     || pir_die "paper profile db_record_bit_size=8 is missing"
   grep -Eq '^bool use_static_db[[:space:]]*=[[:space:]]*true;' "$TEST_SOURCE" \
     || pir_die "paper profile requires the static database path"
 }
 
-prepare_512_source() {
+prepare_1_source() {
   verify_common_checkout
 
   if grep -Eq 'const int rows_db[[:space:]]*=[[:space:]]*2048;' "$TEST_SOURCE" \
@@ -228,25 +228,25 @@ prepare_512_source() {
       && grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,' "$TEST_SOURCE"; then
     sed -i -E \
       -e 's/^const int rows_db[[:space:]]*=[[:space:]]*2048;$/const int rows_db = 32768;/' \
-      -e 's/^const int cols_db[[:space:]]*=[[:space:]]*1024;$/const int cols_db = 16384;/' \
-      -e 's/^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,$/    .db_stack_cells = 8,/' \
+      -e 's/^const int cols_db[[:space:]]*=[[:space:]]*1024;$/const int cols_db = 32768;/' \
+      -e 's/^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,$/    .db_stack_cells = 1,/' \
       "$TEST_SOURCE"
-  elif grep -Eq 'const int rows_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
-      && grep -Eq 'const int cols_db[[:space:]]*=[[:space:]]*16384;' "$TEST_SOURCE" \
-      && grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*8,' "$TEST_SOURCE"; then
-    printf 'profile_source=already-prepared\n'
   elif grep -Eq 'const int rows_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
       && grep -Eq 'const int cols_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
       && grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,' "$TEST_SOURCE"; then
+    printf 'profile_source=already-prepared\n'
+  elif grep -Eq 'const int rows_db[[:space:]]*=[[:space:]]*32768;' "$TEST_SOURCE" \
+      && grep -Eq 'const int cols_db[[:space:]]*=[[:space:]]*16384;' "$TEST_SOURCE" \
+      && grep -Eq '^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*8,' "$TEST_SOURCE"; then
     sed -i -E \
-      -e 's/^const int cols_db[[:space:]]*=[[:space:]]*32768;$/const int cols_db = 16384;/' \
-      -e 's/^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*1,$/    .db_stack_cells = 8,/' \
+      -e 's/^const int cols_db[[:space:]]*=[[:space:]]*16384;$/const int cols_db = 32768;/' \
+      -e 's/^[[:space:]]*\.db_stack_cells[[:space:]]*=[[:space:]]*8,$/    .db_stack_cells = 1,/' \
       "$TEST_SOURCE"
   else
     pir_die "new_pir_test.cc has none of the supported 2 MiB, 512 MiB, or 1 GiB database constants"
   fi
 
-  verify_512_source
+  verify_1_source
 }
 
 effective_available_memory_kib() {
@@ -295,18 +295,18 @@ check_runtime_memory() {
   printf 'effective_available_memory_kib=%s\n' "$memory_kib"
   if ((memory_kib < MINIMUM_MEMORY_KIB)); then
     if [[ "${PIR_ALLOW_LOW_MEMORY:-0}" != "1" ]]; then
-      pir_die "effective memory is below 12 GiB; set PIR_ALLOW_LOW_MEMORY=1 only for an intentional swap/OOM-risk experiment"
+      pir_die "effective memory is below 20 GiB; set PIR_ALLOW_LOW_MEMORY=1 only for an intentional swap/OOM-risk experiment"
     fi
-    printf 'warning: low-memory override enabled; the 512 MiB run may swap heavily or be OOM-killed\n' >&2
+    printf 'warning: low-memory override enabled; the 1 GiB run may swap heavily or be OOM-killed\n' >&2
   elif ((memory_kib < RECOMMENDED_MEMORY_KIB)); then
-    printf 'warning: less than the recommended 16 GiB is available to this process\n' >&2
+    printf 'warning: less than the recommended 32 GiB is available to this process\n' >&2
   fi
 }
 
 write_context() {
   local output_file="$1"
   {
-    printf 'schema=small-client-vpir-paper-512mib-context-v2\n'
+    printf 'schema=small-client-vpir-paper-1gib-context-v2\n'
     printf 'captured_at=%s\n' "$(date --iso-8601=seconds)"
     printf 'project_root=%s\n' "$PIR_PROJECT_ROOT"
     printf 'paper_profile=%s\n' "$PAPER_PROFILE"
@@ -350,7 +350,7 @@ write_context() {
   } >"$output_file"
 }
 
-prepare_512_source
+prepare_1_source
 pir_prepare_compiler
 pir_resolve_bazel
 
@@ -392,9 +392,9 @@ readonly BUILD_STATUS="$?"
 set -e
 
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
-  pir_die "512 MiB build failed (exit $BUILD_STATUS); inspect the terminal output"
+  pir_die "1 GiB build failed (exit $BUILD_STATUS); inspect the terminal output"
 fi
-verify_512_source
+verify_1_source
 
 readonly TEST_BINARY="$WORKSPACE_TEST_BINARY"
 [[ -x "$TEST_BINARY" ]] || pir_die "configured test binary is missing: $TEST_BINARY"
@@ -513,12 +513,12 @@ if [[ "$RUN_TEE_STATUS" -ne 0 ]]; then
   pir_die "tee failed while capturing the run log (exit $RUN_TEE_STATUS)"
 fi
 if [[ "$RUN_STATUS" -ne 0 ]]; then
-  pir_die "512 MiB test failed (exit $RUN_STATUS); inspect $RUN_LOG and $TIME_LOG"
+  pir_die "1 GiB test failed (exit $RUN_STATUS); inspect $RUN_LOG and $TIME_LOG"
 fi
-grep -Fq 'database size: 0.5 GiB' "$RUN_LOG" \
-  || pir_die "test passed without the expected 0.5 GiB profile marker"
-grep -Fq 'Shards: 1 and Stacks: 8' "$RUN_LOG" \
-  || pir_die "test passed without the expected stack-8 profile marker"
+grep -Fq 'database size: 1.0 GiB' "$RUN_LOG" \
+  || pir_die "test passed without the expected 1.0 GiB profile marker"
+grep -Fq 'Shards: 1 and Stacks: 1' "$RUN_LOG" \
+  || pir_die "test passed without the expected stack-1 profile marker"
 grep -Fq "preproc_profile=$PREPROC_PROFILE" "$RUN_LOG" \
   || pir_die "runtime preprocessing profile marker is missing"
 grep -Fq "main_preproc_backend=$MAIN_PREPROC_BACKEND" "$RUN_LOG" \
